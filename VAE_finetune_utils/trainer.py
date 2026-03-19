@@ -43,11 +43,14 @@ class VAEFinetuneTrainer:
             self.intensity_loss = L1Loss(reduction="mean")
 
         self.adv_loss = PatchAdversarialLoss(criterion="least_squares")
+
         self.perceptual_loss = None
         if not getattr(args, "disable_perceptual_loss", False):
             self.perceptual_loss = PerceptualLoss(
                 spatial_dims=3, network_type="squeeze", is_fake_3d=True, fake_3d_ratio=0.2
             ).eval().to(device)
+
+        self.perceptual_loss = PerceptualLoss(spatial_dims=3, network_type="squeeze", is_fake_3d=True, fake_3d_ratio=0.2).eval().to(device)
 
         self.optimizer_g = torch.optim.Adam(params=self.autoencoder.parameters(), lr=args.lr, eps=1e-06 if args.amp else 1e-08)
         self.optimizer_d = torch.optim.Adam(params=self.discriminator.parameters(), lr=args.lr, eps=1e-06 if args.amp else 1e-08)
@@ -88,6 +91,7 @@ class VAEFinetuneTrainer:
         if "unet_state_dict" in checkpoint_autoencoder:
             checkpoint_autoencoder = checkpoint_autoencoder["unet_state_dict"]
         self.autoencoder.load_state_dict(checkpoint_autoencoder)
+
 
     def _compute_perceptual_loss(self, reconstruction: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
         if self.perceptual_loss is None:
