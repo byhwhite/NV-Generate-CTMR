@@ -12,6 +12,14 @@ python train_vae_finetune.py \
   --val_vis_num_images 4
 ```
 
+<<<<<<< ours
+=======
+若环境里 `PerceptualLoss` 触发 torchvision 下载/告警，可增加：
+
+```bash
+  --disable_perceptual_loss
+```
+>>>>>>> theirs
 
 ## 数据集配置
 
