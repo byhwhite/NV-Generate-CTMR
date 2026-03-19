@@ -43,6 +43,13 @@ class VAEFinetuneTrainer:
             self.intensity_loss = L1Loss(reduction="mean")
 
         self.adv_loss = PatchAdversarialLoss(criterion="least_squares")
+
+        self.perceptual_loss = None
+        if not getattr(args, "disable_perceptual_loss", False):
+            self.perceptual_loss = PerceptualLoss(
+                spatial_dims=3, network_type="squeeze", is_fake_3d=True, fake_3d_ratio=0.2
+            ).eval().to(device)
+
         self.perceptual_loss = PerceptualLoss(spatial_dims=3, network_type="squeeze", is_fake_3d=True, fake_3d_ratio=0.2).eval().to(device)
 
         self.optimizer_g = torch.optim.Adam(params=self.autoencoder.parameters(), lr=args.lr, eps=1e-06 if args.amp else 1e-08)
@@ -85,6 +92,26 @@ class VAEFinetuneTrainer:
             checkpoint_autoencoder = checkpoint_autoencoder["unet_state_dict"]
         self.autoencoder.load_state_dict(checkpoint_autoencoder)
 
+
+    def _compute_perceptual_loss(self, reconstruction: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
+        if self.perceptual_loss is None:
+            return torch.zeros((), dtype=reconstruction.dtype, device=reconstruction.device)
+        return self.perceptual_loss(reconstruction.float(), images.float())
+
+    def _infer_with_fallback(self, images: torch.Tensor):
+        try:
+            return dynamic_infer(self.val_inferer, self.autoencoder, images)
+        except NotImplementedError as err:
+            if "slow_conv3d_forward" not in str(err):
+                raise
+            if self.device.type != "cuda":
+                raise
+            autoencoder_cpu = self.autoencoder.to("cpu")
+            images_cpu = images.float().cpu()
+            reconstruction, z_mu, z_sigma = autoencoder_cpu(images_cpu)
+            self.autoencoder.to(self.device)
+            return reconstruction.to(self.device), z_mu.to(self.device), z_sigma.to(self.device)
+
     def train_one_epoch(self, dataloader_train, dataloader_val, epoch: int):
         self.autoencoder.train()
         self.discriminator.train()
@@ -100,7 +127,7 @@ class VAEFinetuneTrainer:
                 losses = {
                     "recons_loss": self.intensity_loss(reconstruction, images),
                     "kl_loss": KL_loss(z_mu, z_sigma),
-                    "p_loss": self.perceptual_loss(reconstruction.float(), images.float()),
+                    "p_loss": self._compute_perceptual_loss(reconstruction, images),
                 }
                 logits_fake = self.discriminator(reconstruction.contiguous().float())[-1]
                 generator_loss = self.adv_loss(logits_fake, target_is_real=True, for_discriminator=False)
@@ -166,19 +193,18 @@ class VAEFinetuneTrainer:
 
         sample_idx_base = 0
         for batch in dataloader_val:
-            images = batch["image"]
-            reconstruction, z_mu, z_sigma = dynamic_infer(self.val_inferer, self.autoencoder, images)
-            reconstruction = reconstruction.to(self.device)
-            images_dev = images.to(self.device)
+            images_dev = batch["image"].to(self.device).contiguous()
+            with autocast("cuda", enabled=self.args.amp):
+                reconstruction, z_mu, z_sigma = self._infer_with_fallback(images_dev)
 
             val_losses["recons_loss"] += self.intensity_loss(reconstruction, images_dev).item()
             val_losses["kl_loss"] += KL_loss(z_mu, z_sigma).item()
-            val_losses["p_loss"] += self.perceptual_loss(reconstruction.float(), images_dev.float()).item()
+            val_losses["p_loss"] += self._compute_perceptual_loss(reconstruction, images_dev).item()
 
-            bs = images.shape[0]
+            bs = images_dev.shape[0]
             for i in range(bs):
                 if sample_idx_base + i in target_vis_ids:
-                    cached_originals.append(images[i])
+                    cached_originals.append(images_dev[i].cpu())
                     cached_recons.append(reconstruction[i].cpu())
                     cached_paths.append(batch["path"][i])
             sample_idx_base += bs
@@ -217,4 +243,3 @@ class VAEFinetuneTrainer:
         if val_loss < self.state.best_val_loss:
             self.state.best_val_loss = val_loss
             torch.save(self.autoencoder.state_dict(), self.args.best_autoencoder_path)
-

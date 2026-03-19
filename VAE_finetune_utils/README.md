@@ -12,6 +12,7 @@ python train_vae_finetune.py \
   --val_vis_num_images 4
 ```
 
+
 ## 数据集配置
 
 `dataset_spec_json` 是一个列表，每个元素必须包含：

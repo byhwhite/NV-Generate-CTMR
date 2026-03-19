@@ -35,6 +35,8 @@ def parse_args():
     parser.add_argument("--lr_warmup_scale1", type=float, default=0.01)
     parser.add_argument("--lr_warmup_scale2", type=float, default=0.1)
     parser.add_argument("--disable_amp", action="store_true")
+    parser.add_argument("--disable_perceptual_loss", action="store_true", help="Disable perceptual loss to avoid torchvision model download/warnings.")
+
     return parser.parse_args()
 
 
