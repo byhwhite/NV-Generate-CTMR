@@ -1,0 +1,14 @@
+[
+  {
+    "name": "dataset_a",
+    "train_json": "/absolute/path/to/dataset_a_train.json",
+    "val_json": "/absolute/path/to/dataset_a_val.json",
+    "samples_per_epoch": 200
+  },
+  {
+    "name": "dataset_b",
+    "train_json": "/absolute/path/to/dataset_b_train.json",
+    "val_json": "/absolute/path/to/dataset_b_val.json",
+    "samples_per_epoch": 100
+  }
+]
